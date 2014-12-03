@@ -1,6 +1,8 @@
 package src.knn;
 
-import java.util.Random;
+import src.knn.model.Point;
+
+import java.util.*;
 
 /**
  * Created with IntelliJ IDEA.
@@ -19,7 +21,7 @@ public class PointHelper {
         return pointHelper;
     }
 
-    public static int randInt(int min, int max) {
+    public int randInt(int min, int max) {
         int randomNum = new Random().nextInt((max - min) + 1) + min;
         return randomNum;
     }
@@ -47,6 +49,20 @@ public class PointHelper {
             }
             return Math.sqrt(squaresSummation);
         }
+    }
+    public double getSummationDistanceBetweenPointAndArray(Point point, List<Point> points){
+        double distance = 0;
+        for (Point p:points){
+            distance += getDistanceBetweenPoints(point, p);
+        }
+        return distance;
+    }
+    public List<Point> union(List<Point> list1, List<Point> list2) {
+        Set<Point> set = new HashSet<Point>();
 
+        set.addAll(list1);
+        set.addAll(list2);
+
+        return new ArrayList<Point>(set);
     }
 }
