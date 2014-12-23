@@ -57,12 +57,12 @@ public class PointHelper {
         }
         return distance;
     }
-    public List<Point> union(List<Point> list1, List<Point> list2) {
-        Set<Point> set = new HashSet<Point>();
+    public <T> List<T> union(List<T> list1, List<T> list2) {
+        Set<T> set = new HashSet<T>();
 
         set.addAll(list1);
         set.addAll(list2);
 
-        return new ArrayList<Point>(set);
+        return new ArrayList<T>(set);
     }
 }

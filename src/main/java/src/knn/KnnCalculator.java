@@ -8,6 +8,7 @@ import org.apache.spark.api.java.function.PairFunction;
 import scala.Tuple2;
 import src.knn.model.PivotPoint;
 import src.knn.model.Point;
+import src.knn.model.PointWithDistance;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -42,16 +43,8 @@ public class KnnCalculator implements Serializable{
         JavaPairRDD<Integer, PivotPoint> pairsR = findRPointsAssignedToPivots(sourceRPointsRDD);
         JavaPairRDD<Integer, PivotPoint> pairsS = findSPointsAssignedToPivots(sourceSPointsRDD);
         JavaPairRDD<Integer, Iterable<PivotPoint>> pivotPoints = pairsR.union(pairsS).groupByKey();
-        JavaRDD<PivotPoint> groupedPivots = pivotPoints.map(tuple -> {
-            PivotPoint pivotPoint = new PivotPoint();
-            for (PivotPoint p:tuple._2){
-                pivotPoint.setPivot(p.getPivot());
-                pivotPoint.setrPointsAssignedToPivot(PointHelper.instance().union(pivotPoint.getrPointsAssignedToPivot(), p.getrPointsAssignedToPivot()));
-                pivotPoint.setsPointsAssignedToPivot(PointHelper.instance().union(pivotPoint.getsPointsAssignedToPivot(), p.getsPointsAssignedToPivot()));
-            }
-            return pivotPoint;
-        });
-        List<PivotPoint> pivotPointList = groupedPivots.collect();
+        JavaRDD<PivotPoint> groupedPivots = groupPivotPointsAndCollectStatistics(pivotPoints);
+//        List<PivotPoint> pivotPointList = groupedPivots.collect();
 //        JavaRDD<PivotPoint> pivotPoints = findRPointsAssignedToPivots(sourceRPointsRDD).union(findSPointsAssignedToPivots(sourceSPointsRDD));
 //        pivotPoints.groupBy()
 //        PivotPoint pivotPointsAfterReduce = pivotPoints.reduce((pivotPoint1, pivotPoint2) -> {
@@ -65,10 +58,32 @@ public class KnnCalculator implements Serializable{
 //        pivots.reduce((p1, p2) -> PointHelper.instance().union(p1, p2));
         sc.stop();
     }
-    private JavaPairRDD<Integer, PivotPoint> findRPointsAssignedToPivots(JavaRDD<Point> sourceRPointsRDD){
-        return sourceRPointsRDD.mapToPair(keyValueRSet);
-    }
 
+    private JavaRDD<PivotPoint> groupPivotPointsAndCollectStatistics(JavaPairRDD<Integer, Iterable<PivotPoint>> pivotPoints){
+        return pivotPoints.map(tuple -> {
+            PivotPoint pivotPoint = new PivotPoint();
+            double maxDistanceR = 0;
+            double maxDistanceS = 0;
+            for (PivotPoint p:tuple._2){
+                pivotPoint.setPivot(p.getPivot());
+                pivotPoint.setrPointsAssignedToPivot(PointHelper.instance().union(pivotPoint.getrPointsAssignedToPivot(), p.getrPointsAssignedToPivot()));
+                pivotPoint.setsPointsAssignedToPivot(PointHelper.instance().union(pivotPoint.getsPointsAssignedToPivot(), p.getsPointsAssignedToPivot()));
+            }
+            for (PointWithDistance pointWithDistance:pivotPoint.getrPointsAssignedToPivot()){
+                if (pointWithDistance.getDistance() > maxDistanceR){
+                    maxDistanceR = pointWithDistance.getDistance();
+                }
+            }
+            for (PointWithDistance pointWithDistance:pivotPoint.getsPointsAssignedToPivot()){
+                if (pointWithDistance.getDistance() > maxDistanceS){
+                    maxDistanceS = pointWithDistance.getDistance();
+                }
+            }
+            pivotPoint.setMaxDistanceR(maxDistanceR);
+            pivotPoint.setMaxDistanceS(maxDistanceS);
+            return pivotPoint;
+        });
+    }
     //Decide to which pivot point we should add each point from S
     private JavaPairRDD<Integer, PivotPoint> findSPointsAssignedToPivots(JavaRDD<Point> sourceSPointsRDD){
         return sourceSPointsRDD.mapToPair(keyValueSSet);
@@ -89,13 +104,17 @@ public class KnnCalculator implements Serializable{
                     }
                     if (tempPivot != null){
                         pivotPoint.setPivot(tempPivot);
-                        pivotPoint.addPointToS(point);
+                        pivotPoint.addPointToS(new PointWithDistance(point, tempPivotValue));
                         return new Tuple2(pivotPoint.getPivot().getId(), pivotPoint);
                     }
                     return null;
                 }
             };
     //Decide to which pivot point we should add each point from R
+    private JavaPairRDD<Integer, PivotPoint> findRPointsAssignedToPivots(JavaRDD<Point> sourceRPointsRDD){
+        return sourceRPointsRDD.mapToPair(keyValueRSet);
+    }
+
     PairFunction<Point, Integer, PivotPoint> keyValueRSet =
             new PairFunction<Point, Integer, PivotPoint>() {
                 public Tuple2<Integer, PivotPoint> call(Point point) throws Exception {
@@ -111,7 +130,9 @@ public class KnnCalculator implements Serializable{
                     }
                     if (tempPivot != null){
                         pivotPoint.setPivot(tempPivot);
-                        pivotPoint.addPointToR(point);
+                        if(pivotPoint.getMaxDistanceR() < tempPivotValue)
+                            pivotPoint.setMaxDistanceR(tempPivotValue);
+                        pivotPoint.addPointToR(new PointWithDistance(point, tempPivotValue));
                         return new Tuple2(pivotPoint.getPivot().getId(), pivotPoint);
                     }
                     return null;
