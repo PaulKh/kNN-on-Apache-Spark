@@ -17,7 +17,7 @@ import java.util.Random;
 
 public class KNNMain {
     public static void main(String[] args){
-//        String temp = PointHelper.instance().generateArrayOfRandomPoints(2, 30000, 1, 1000);
+//        String temp = PointHelper.instance().generateArrayOfRandomPoints(2, 1000000, 1, 50000);
         KnnCalculator knnCalculator = new KnnCalculator();
         return;
      }

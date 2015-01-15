@@ -34,6 +34,21 @@ public class Point implements Serializable{
         for (Integer i:coordinates){
             System.out.print(i + ",");
         }
-
+    }
+    @Override
+    public boolean equals(Object point){
+        if (point instanceof Point){
+            Point tempPoint = (Point) point;
+            if (tempPoint.getCoordinates().size() != this.getCoordinates().size())
+                return false;
+            for (int i = 0; i < tempPoint.getCoordinates().size(); i++){
+                if (tempPoint.getCoordinates().get(i) != this.getCoordinates().get(i)){
+                     return false;
+                }
+            }
+            return true;
+        }
+        else
+            return false;
     }
 }

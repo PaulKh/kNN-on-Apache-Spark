@@ -16,6 +16,7 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -28,23 +29,25 @@ import java.util.List;
 public class KnnCalculator implements Serializable{
     private static final int numberOfPivots = 20;
     private static final int k = 10;
-    private static final String rArraySource = "r_points_two_dimension_array.txt";
-    private static final String sArraySource = "s_points_two_dimension_array.txt";
+    private static final String rArraySource = "src/main/resources/r_points_two_dimension_array.txt";
+    private static final String sArraySource = "src/main/resources/s_points_two_dimension_array.txt";
     private List<Point> pivots;
+    private double distancesBetweenPivots[][];
 
     public KnnCalculator() {
         SparkConf sparkConf = new SparkConf().setAppName("KNN Spark").setMaster("local[2]").set("spark.executor.memory", "3000m");
         JavaSparkContext sc = new JavaSparkContext(sparkConf);
         List<Point> sourceRPoints = parsePointsFromSource(rArraySource);
         List<Point> sourceSPoints = parsePointsFromSource(sArraySource);
-        pivots = getPivots(sourceRPoints);
+        pivots = getPivotsRandomSelection(sourceRPoints, 10);
         JavaRDD<Point> sourceRPointsRDD = sc.parallelize(sourceRPoints);
         JavaRDD<Point> sourceSPointsRDD = sc.parallelize(sourceSPoints);
         JavaPairRDD<Integer, PivotPoint> pairsR = findRPointsAssignedToPivots(sourceRPointsRDD);
         JavaPairRDD<Integer, PivotPoint> pairsS = findSPointsAssignedToPivots(sourceSPointsRDD);
         JavaPairRDD<Integer, Iterable<PivotPoint>> pivotPoints = pairsR.union(pairsS).groupByKey();
-        JavaRDD<PivotPoint> groupedPivots = groupPivotPointsAndCollectStatistics(pivotPoints);
-//        List<PivotPoint> pivotPointList = groupedPivots.collect();
+        JavaRDD<PivotPoint> groupedPivots = groupPivotPointsAndCollectStatistics(pivotPoints).cache();
+
+        List<PivotPoint> pivotPointList = groupedPivots.collect();
 //        JavaRDD<PivotPoint> pivotPoints = findRPointsAssignedToPivots(sourceRPointsRDD).union(findSPointsAssignedToPivots(sourceSPointsRDD));
 //        pivotPoints.groupBy()
 //        PivotPoint pivotPointsAfterReduce = pivotPoints.reduce((pivotPoint1, pivotPoint2) -> {
@@ -79,10 +82,23 @@ public class KnnCalculator implements Serializable{
                     maxDistanceS = pointWithDistance.getDistance();
                 }
             }
+
             pivotPoint.setMaxDistanceR(maxDistanceR);
             pivotPoint.setMaxDistanceS(maxDistanceS);
+            calculateKNNInSForPivot(pivotPoint.getsPointsAssignedToPivot());
             return pivotPoint;
         });
+    }
+    private List<PointWithDistance> calculateKNNInSForPivot(List<PointWithDistance> pointsWithDistance){
+        for(int i = 0; i < k; i++){
+            int tempNearestPointIndex = i;
+            for (int j = i; j < pointsWithDistance.size() - 1; j++){
+                if (pointsWithDistance.get(j).getDistance() < pointsWithDistance.get(tempNearestPointIndex).getDistance())
+                    tempNearestPointIndex = j;
+            }
+            Collections.swap(pointsWithDistance, i, tempNearestPointIndex);
+        }
+        return pointsWithDistance;
     }
     //Decide to which pivot point we should add each point from S
     private JavaPairRDD<Integer, PivotPoint> findSPointsAssignedToPivots(JavaRDD<Point> sourceSPointsRDD){
@@ -169,7 +185,7 @@ public class KnnCalculator implements Serializable{
         byte[] encoded = Files.readAllBytes(Paths.get(path));
         return new String(encoded, encoding);
     }
-    private List<Point> getPivots(List<Point> allPoints){      //farthest partitioning method, doesn't work
+    private List<Point> getPivotsFarthestSelection(List<Point> allPoints){      //farthest partitioning method, doesn't work
         List<Point> pivots = new ArrayList<Point>();
         Point randomPoint = allPoints.get(PointHelper.instance().randInt(0, allPoints.size()));
         pivots.add(randomPoint);
@@ -194,6 +210,44 @@ public class KnnCalculator implements Serializable{
             }
         }
         return pivots;
+    }
+    private List<Point> getPivotsRandomSelection(List<Point> allPoints, int numberOfTries){
+        List<Point> pivotPoints = new ArrayList<Point>();
+        double maxDistance = 0;
+        for (int i = 0; i < numberOfTries; i++){
+            List<Point> tempPoints = new ArrayList<Point>();
+            for (int j = 0; j < numberOfPivots; j++){
+                int k = PointHelper.instance().randInt(0, allPoints.size() - 1);
+                if (tempPoints.contains(allPoints.get(k)))
+                    j--;
+                else
+                    tempPoints.add(allPoints.get(k));
+            }
+            double tempDistance = getSummationOfDistancesBetweenAllPoints(tempPoints);
+            if (tempDistance > maxDistance){
+                maxDistance = tempDistance;
+                pivotPoints = tempPoints;
+            }
+        }
+        initDistancesBetweenPoints(pivotPoints);
+        return pivotPoints;
+    }
+    private void initDistancesBetweenPoints(List<Point> points){
+        distancesBetweenPivots = new double[points.size()][points.size()];
+        for (int i = 0; i < points.size(); i++){
+            for (int j = 0; j < i; j++){
+                distancesBetweenPivots[i][j] = PointHelper.instance().getDistanceBetweenPoints(points.get(i), points.get(j));
+            }
+        }
+    }
+    private double getSummationOfDistancesBetweenAllPoints(List<Point> points){
+        double distance = 0;
+        for (int i = 0; i < points.size(); i++){
+            for (int j = 0; j < points.size(); j++){
+                distance += PointHelper.instance().getDistanceBetweenPoints(points.get(i), points.get(j));
+            }
+        }
+        return distance;
     }
 
 }

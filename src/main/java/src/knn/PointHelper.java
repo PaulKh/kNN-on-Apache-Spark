@@ -27,13 +27,25 @@ public class PointHelper {
     }
     public String generateArrayOfRandomPoints(int dimension, int maximum, int minimum, int numberOfPoints){
         String points = "";
+        List<Point> pointList = new ArrayList<Point>();
         for (int i = 0; i < numberOfPoints; i++){
+            List<Integer> coordinates = new ArrayList<Integer>();
             for (int j = 0; j < dimension; j++){
-                points = points + randInt(minimum, maximum);
-                if (j != dimension - 1)
-                    points += ",";
+                coordinates.add(randInt(minimum, maximum));
             }
-            points += " ";
+            Point point = new Point(coordinates);
+            if (isListfPointsContainPoint(pointList, point)){
+                i--;
+            }
+            else{
+                for (int j = 0; j < dimension; j++){
+                    points = points + coordinates.get(j);
+                    if (j != dimension - 1)
+                        points += ",";
+                }
+                points += " ";
+            }
+
         }
         return points;
     }
@@ -43,7 +55,7 @@ public class PointHelper {
         else if(p1.getCoordinates().size() == 1)
             return Math.abs(p1.getCoordinates().get(0) - p2.getCoordinates().get(0));
         else{
-            int squaresSummation = 0;
+            long squaresSummation = 0;
             for (int i = 0; i < p1.getCoordinates().size(); i++){
                 squaresSummation += Math.pow(p1.getCoordinates().get(i) - p2.getCoordinates().get(i), 2);
             }
@@ -64,5 +76,13 @@ public class PointHelper {
         set.addAll(list2);
 
         return new ArrayList<T>(set);
+    }
+    public boolean isListfPointsContainPoint(List<Point> points, Point point){
+        for (Point p:points){
+            if (p.equals(point)){
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -16,8 +16,7 @@ public class PivotPoint implements Serializable{
     private double maxDistanceS = 0;
     private Point pivot = null;
     private List<PointWithDistance> rPointsAssignedToPivot = new ArrayList<PointWithDistance>();
-    private List<PointWithDistance> sPointsAssignedToPivot = new ArrayList<PointWithDistance>();
-
+    private List<PointWithDistance> sPointsAssignedToPivot = new ArrayList<PointWithDistance>(); //First k of the elements are sorted by the distance for the needs of algorithm
     public Point getPivot() {
         return pivot;
     }
