@@ -6,9 +6,7 @@ import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.PairFunction;
 import scala.Tuple2;
-import src.knn.model.PivotPoint;
-import src.knn.model.Point;
-import src.knn.model.PointWithDistance;
+import src.knn.model.*;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -16,6 +14,7 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -27,48 +26,122 @@ import java.util.List;
  * To change this template use File | Settings | File Templates.
  */
 public class KnnCalculator implements Serializable{
-    private static final int numberOfPivots = 20;
-    private static final int k = 10;
     private static final String rArraySource = "src/main/resources/r_points_two_dimension_array.txt";
     private static final String sArraySource = "src/main/resources/s_points_two_dimension_array.txt";
-    private List<Point> pivots;
-    private double distancesBetweenPivots[][];
 
     public KnnCalculator() {
         SparkConf sparkConf = new SparkConf().setAppName("KNN Spark").setMaster("local[2]").set("spark.executor.memory", "3000m");
         JavaSparkContext sc = new JavaSparkContext(sparkConf);
         List<Point> sourceRPoints = parsePointsFromSource(rArraySource);
         List<Point> sourceSPoints = parsePointsFromSource(sArraySource);
-        pivots = getPivotsRandomSelection(sourceRPoints, 10);
+        initPivotsByRandomSelection(sourceRPoints, 10);
         JavaRDD<Point> sourceRPointsRDD = sc.parallelize(sourceRPoints);
         JavaRDD<Point> sourceSPointsRDD = sc.parallelize(sourceSPoints);
-        JavaPairRDD<Integer, PivotPoint> pairsR = findRPointsAssignedToPivots(sourceRPointsRDD);
-        JavaPairRDD<Integer, PivotPoint> pairsS = findSPointsAssignedToPivots(sourceSPointsRDD);
-        JavaPairRDD<Integer, Iterable<PivotPoint>> pivotPoints = pairsR.union(pairsS).groupByKey();
-        JavaRDD<PivotPoint> groupedPivots = groupPivotPointsAndCollectStatistics(pivotPoints).cache();
+        JavaPairRDD<Integer, FirstPointDistributionEntity> pairsR = findRPointsAssignedToPivots(sourceRPointsRDD);
+        JavaPairRDD<Integer, FirstPointDistributionEntity> pairsS = findSPointsAssignedToPivots(sourceSPointsRDD);
+        JavaPairRDD<Integer, Iterable<FirstPointDistributionEntity>> pivotPoints = pairsR.union(pairsS).groupByKey();
+        JavaRDD<FirstPointDistributionEntity> groupedPivots = groupPivotPointsAndCollectStatistics(pivotPoints).cache();
 
-        List<PivotPoint> pivotPointList = groupedPivots.collect();
+        JavaRDD<BoundingEntity> boundingEntityJavaRDD = calculateBounds(groupedPivots);
+
+        JavaRDD<FinalPartition[]> finalPartitions = assignPointsAccordingToBounds(boundingEntityJavaRDD);
+//        List<FinalPartition[]> result = finalPartitions.collect();
+        FinalPartition[] reducedData = finalPartitions.reduce((partition1, partition2) -> {
+            for (int i = 0; i < partition1.length; i++){
+                if (partition2[i].getPointsR().size() > 0){
+                    partition1[i].setPointsR(partition2[i].getPointsR());
+                    partition1[i].setPivotPointId(partition2[i].getPivotPointId());
+                }
+                partition1[i].addPartitionsOfS(partition2[i].getPointsS());
+            }
+            return partition1;
+        });
+
+        for (int i = 0; i < reducedData.length; i++){
+            int sum = 0;
+            for (PartitionOfSAssignedToPivot temp:reducedData[i].getPointsS()){
+                sum += temp.getsPoints().size();
+            }
+            System.out.println("sum[" + i + "] = " + sum + "Rs.count = " + reducedData[i].getPointsR().size() + " numberOfComputations = " + reducedData[i].getPointsR().size() * sum);
+        }
+        JavaRDD<FinalPartition> finalFinalPartitioning = sc.parallelize(Arrays.asList(reducedData));
+//        System.out.println("sum = " + sum);
 //        JavaRDD<PivotPoint> pivotPoints = findRPointsAssignedToPivots(sourceRPointsRDD).union(findSPointsAssignedToPivots(sourceSPointsRDD));
 //        pivotPoints.groupBy()
-//        PivotPoint pivotPointsAfterReduce = pivotPoints.reduce((pivotPoint1, pivotPoint2) -> {
-//            if(pivotPoint1.getPivot() == pivotPoint2.getPivot()){
-//                pivotPoint1.setrPointsAssignedToPivot(PointHelper.instance().union(pivotPoint1.getrPointsAssignedToPivot(), pivotPoint2.getrPointsAssignedToPivot()));
-//                pivotPoint1.setsPointsAssignedToPivot(PointHelper.instance().union(pivotPoint1.getsPointsAssignedToPivot(), pivotPoint2.getsPointsAssignedToPivot()));
+//        FirstPointDistributionEntity pivotPointsAfterReduce = groupedPivots.reduce((pivotPoint1, pivotPoint2) -> {
+//                System.out.println(pivotPoint1.getPivot().getId() + " " + pivotPoint2.getPivot().getId());
 //                return pivotPoint1;
 //            }
-//        });
+//        );
 //        JavaRDD<List<Point>> pivots = getPivots(sourceData, numberOfPivots);
 //        pivots.reduce((p1, p2) -> PointHelper.instance().union(p1, p2));
         sc.stop();
     }
 
-    private JavaRDD<PivotPoint> groupPivotPointsAndCollectStatistics(JavaPairRDD<Integer, Iterable<PivotPoint>> pivotPoints){
+    private JavaRDD<FinalPartition[]> assignPointsAccordingToBounds(JavaRDD<BoundingEntity> boundingEntityJavaRDD){
+        return boundingEntityJavaRDD.map(boundingEntity -> {
+            FinalPartition[] partitions = new FinalPartition[SharedMemory.numberOfPivots];
+            for (int i = 0; i < partitions.length; i++){
+                partitions[i] = new FinalPartition();
+            }
+            partitions[boundingEntity.getPivotPointId()].setPivotPointId(boundingEntity.getPivotPointId());
+            partitions[boundingEntity.getPivotPointId()].setPointsR(boundingEntity.getrPointsAssignedToPivot());
+            PartitionOfSAssignedToPivot[] partitionOfSAssignedToPivots = new PartitionOfSAssignedToPivot[SharedMemory.numberOfPivots];
+            for (int i = 0; i < partitionOfSAssignedToPivots.length; i++){
+                partitionOfSAssignedToPivots[i] = new PartitionOfSAssignedToPivot(boundingEntity.getPivotPointId());
+            }
+            for (PointWithLowerBounds pointWithLowerBounds: boundingEntity.getPointsWithLowerBounds()){
+                Point pointS = pointWithLowerBounds.getP();
+                for (int i = 0; i < SharedMemory.numberOfPivots; i++){
+                    if (SharedMemory.maximumUpperBounds[i].getYongest() > pointWithLowerBounds.getLowerBounds()[i]){
+                        partitionOfSAssignedToPivots[i].addPoint(pointS);
+                    }
+                }
+            }
+            for (int i = 0; i < partitionOfSAssignedToPivots.length; i++){
+                if (partitionOfSAssignedToPivots[i].getsPoints().size() > 0)
+                    partitions[i].addPartitionOfS(partitionOfSAssignedToPivots[i]);
+            }
+            return partitions;
+        });
+    }
+    private JavaRDD<BoundingEntity> calculateBounds(JavaRDD<FirstPointDistributionEntity> groupedPivots){
+        return groupedPivots.map(pivot -> {
+            BoundingEntity boundingEntity = new BoundingEntity();
+            boundingEntity.setrPointsAssignedToPivot(pivot.getrPointsAssignedToPivot());
+            int amountOfPoints = Math.min(SharedMemory.k, pivot.getsPointsAssignedToPivot().size());
+            for(int i = 0; i < amountOfPoints; i++){
+                double dist = PointHelper.instance().getDistanceBetweenPoints(SharedMemory.pivots[pivot.getPivotPointId()].getPivot(), pivot.getsPointsAssignedToPivot().get(i).getPoint());
+                for (int j = 0; j < SharedMemory.numberOfPivots; j++){
+                    double upperBound = SharedMemory.distancesBetweenPivots[pivot.getPivotPointId()][j] + SharedMemory.pivots[j].getMaxDistanceR() + dist;
+                    if (SharedMemory.maximumUpperBounds[j].size() < SharedMemory.k){
+                        SharedMemory.maximumUpperBounds[j].add(upperBound);
+                    }
+                    else if(SharedMemory.maximumUpperBounds[j].getYongest() > upperBound){
+                        SharedMemory.maximumUpperBounds[j].add(upperBound);
+                    }
+                }
+            }
+            for (int i = 0; i < pivot.getsPointsAssignedToPivot().size(); i++){
+                PointWithLowerBounds pointWithLowerBounds = new PointWithLowerBounds(pivot.getsPointsAssignedToPivot().get(i).getPoint());
+                double dist = PointHelper.instance().getDistanceBetweenPoints(SharedMemory.pivots[pivot.getPivotPointId()].getPivot(), pivot.getsPointsAssignedToPivot().get(i).getPoint());
+                for (int j = 0; j < SharedMemory.numberOfPivots; j++){
+                    double lowerBound = Math.max(0, SharedMemory.distancesBetweenPivots[pivot.getPivotPointId()][j] - SharedMemory.pivots[j].getMaxDistanceR() - dist);
+                    pointWithLowerBounds.setLowerBound(j, lowerBound);
+                }
+                boundingEntity.addPointWithLowerBounds(pointWithLowerBounds);
+            }
+            boundingEntity.setPivotPointId(pivot.getPivotPointId());
+            return boundingEntity;
+        });
+    }
+    private JavaRDD<FirstPointDistributionEntity> groupPivotPointsAndCollectStatistics(JavaPairRDD<Integer, Iterable<FirstPointDistributionEntity>> pivotPoints){
         return pivotPoints.map(tuple -> {
-            PivotPoint pivotPoint = new PivotPoint();
+            FirstPointDistributionEntity pivotPoint = new FirstPointDistributionEntity();
             double maxDistanceR = 0;
             double maxDistanceS = 0;
-            for (PivotPoint p:tuple._2){
-                pivotPoint.setPivot(p.getPivot());
+            for (FirstPointDistributionEntity p:tuple._2){
+                pivotPoint.setPivotPointId(p.getPivotPointId());
                 pivotPoint.setrPointsAssignedToPivot(PointHelper.instance().union(pivotPoint.getrPointsAssignedToPivot(), p.getrPointsAssignedToPivot()));
                 pivotPoint.setsPointsAssignedToPivot(PointHelper.instance().union(pivotPoint.getsPointsAssignedToPivot(), p.getsPointsAssignedToPivot()));
             }
@@ -83,14 +156,15 @@ public class KnnCalculator implements Serializable{
                 }
             }
 
-            pivotPoint.setMaxDistanceR(maxDistanceR);
-            pivotPoint.setMaxDistanceS(maxDistanceS);
+            pivotPoint.getPivotObject().setMaxDistanceR(maxDistanceR);
+            pivotPoint.getPivotObject().setMaxDistanceS(maxDistanceS);
             calculateKNNInSForPivot(pivotPoint.getsPointsAssignedToPivot());
             return pivotPoint;
         });
     }
     private List<PointWithDistance> calculateKNNInSForPivot(List<PointWithDistance> pointsWithDistance){
-        for(int i = 0; i < k; i++){
+        int numberOfLoops = Math.min(pointsWithDistance.size(), SharedMemory.k);
+        for(int i = 0; i < numberOfLoops; i++){
             int tempNearestPointIndex = i;
             for (int j = i; j < pointsWithDistance.size() - 1; j++){
                 if (pointsWithDistance.get(j).getDistance() < pointsWithDistance.get(tempNearestPointIndex).getDistance())
@@ -101,55 +175,55 @@ public class KnnCalculator implements Serializable{
         return pointsWithDistance;
     }
     //Decide to which pivot point we should add each point from S
-    private JavaPairRDD<Integer, PivotPoint> findSPointsAssignedToPivots(JavaRDD<Point> sourceSPointsRDD){
+    private JavaPairRDD<Integer, FirstPointDistributionEntity> findSPointsAssignedToPivots(JavaRDD<Point> sourceSPointsRDD){
         return sourceSPointsRDD.mapToPair(keyValueSSet);
     }
 
-    PairFunction<Point, Integer, PivotPoint> keyValueSSet =
-            new PairFunction<Point, Integer, PivotPoint>() {
-                public Tuple2<Integer, PivotPoint> call(Point point) throws Exception {
-                    PivotPoint pivotPoint = new PivotPoint();
-                    Point tempPivot = null;
-                    double tempPivotValue = 10000000;
-                    for (Point pivot:pivots){
-                        double dist = PointHelper.instance().getDistanceBetweenPoints(pivot, point);
-                        if (dist < tempPivotValue){
-                            tempPivotValue = dist;
-                            tempPivot = pivot;
+    PairFunction<Point, Integer, FirstPointDistributionEntity> keyValueSSet =
+            new PairFunction<Point, Integer, FirstPointDistributionEntity>() {
+                public Tuple2<Integer, FirstPointDistributionEntity> call(Point point) throws Exception {
+                    FirstPointDistributionEntity firstPointAttachementEntity = new FirstPointDistributionEntity();
+                    double tempDistanceToPivot = 10000000;
+                    int tempPivotId = -1;
+                    for (int i = 0; i < SharedMemory.pivots.length; i++){
+                        PivotPoint pivot = SharedMemory.pivots[i];
+                        double dist = PointHelper.instance().getDistanceBetweenPoints(pivot.getPivot(), point);
+                        if (dist < tempDistanceToPivot){
+                            tempDistanceToPivot = dist;
+                            tempPivotId = i;
                         }
                     }
-                    if (tempPivot != null){
-                        pivotPoint.setPivot(tempPivot);
-                        pivotPoint.addPointToS(new PointWithDistance(point, tempPivotValue));
-                        return new Tuple2(pivotPoint.getPivot().getId(), pivotPoint);
+                    if (tempPivotId != -1){
+                         firstPointAttachementEntity.setPivotPointId(tempPivotId);
+                         firstPointAttachementEntity.addPointToS(new PointWithDistance(point, tempDistanceToPivot));
+                        return new Tuple2(tempPivotId, firstPointAttachementEntity);
                     }
                     return null;
                 }
             };
     //Decide to which pivot point we should add each point from R
-    private JavaPairRDD<Integer, PivotPoint> findRPointsAssignedToPivots(JavaRDD<Point> sourceRPointsRDD){
+    private JavaPairRDD<Integer, FirstPointDistributionEntity> findRPointsAssignedToPivots(JavaRDD<Point> sourceRPointsRDD){
         return sourceRPointsRDD.mapToPair(keyValueRSet);
     }
 
-    PairFunction<Point, Integer, PivotPoint> keyValueRSet =
-            new PairFunction<Point, Integer, PivotPoint>() {
-                public Tuple2<Integer, PivotPoint> call(Point point) throws Exception {
-                    PivotPoint pivotPoint = new PivotPoint();
-                    Point tempPivot = null;
+    PairFunction<Point, Integer, FirstPointDistributionEntity> keyValueRSet =
+            new PairFunction<Point, Integer, FirstPointDistributionEntity>() {
+                public Tuple2<Integer, FirstPointDistributionEntity> call(Point point) throws Exception {
+                    FirstPointDistributionEntity pivotPoint = new FirstPointDistributionEntity();
+                    int tempPivotId = -1;
                     double tempPivotValue = 10000000;
-                    for (Point pivot:pivots){
-                        double dist = PointHelper.instance().getDistanceBetweenPoints(pivot, point);
+                    for (int i = 0; i < SharedMemory.pivots.length; i++){
+                        PivotPoint pivot = SharedMemory.pivots[i];
+                        double dist = PointHelper.instance().getDistanceBetweenPoints(pivot.getPivot(), point);
                         if (dist < tempPivotValue){
                             tempPivotValue = dist;
-                            tempPivot = pivot;
+                            tempPivotId = i;
                         }
                     }
-                    if (tempPivot != null){
-                        pivotPoint.setPivot(tempPivot);
-                        if(pivotPoint.getMaxDistanceR() < tempPivotValue)
-                            pivotPoint.setMaxDistanceR(tempPivotValue);
+                    if (tempPivotId != -1){
+                        pivotPoint.setPivotPointId(tempPivotId);
                         pivotPoint.addPointToR(new PointWithDistance(point, tempPivotValue));
-                        return new Tuple2(pivotPoint.getPivot().getId(), pivotPoint);
+                        return new Tuple2(tempPivotId, pivotPoint);
                     }
                     return null;
                 }
@@ -190,7 +264,7 @@ public class KnnCalculator implements Serializable{
         Point randomPoint = allPoints.get(PointHelper.instance().randInt(0, allPoints.size()));
         pivots.add(randomPoint);
         randomPoint.printPoint();
-        for (int i = 0; i < numberOfPivots - 1; i++){
+        for (int i = 0; i < SharedMemory.numberOfPivots - 1; i++){
             Point tempMaximumPoint = null;
             double tempMaximumValue = 0;
 
@@ -211,12 +285,12 @@ public class KnnCalculator implements Serializable{
         }
         return pivots;
     }
-    private List<Point> getPivotsRandomSelection(List<Point> allPoints, int numberOfTries){
+    private void initPivotsByRandomSelection(List<Point> allPoints, int numberOfTries){
         List<Point> pivotPoints = new ArrayList<Point>();
         double maxDistance = 0;
         for (int i = 0; i < numberOfTries; i++){
             List<Point> tempPoints = new ArrayList<Point>();
-            for (int j = 0; j < numberOfPivots; j++){
+            for (int j = 0; j < SharedMemory.numberOfPivots; j++){
                 int k = PointHelper.instance().randInt(0, allPoints.size() - 1);
                 if (tempPoints.contains(allPoints.get(k)))
                     j--;
@@ -230,13 +304,14 @@ public class KnnCalculator implements Serializable{
             }
         }
         initDistancesBetweenPoints(pivotPoints);
-        return pivotPoints;
+        SharedMemory.initPoints(pivotPoints);
     }
     private void initDistancesBetweenPoints(List<Point> points){
-        distancesBetweenPivots = new double[points.size()][points.size()];
+        SharedMemory.distancesBetweenPivots = new double[points.size()][points.size()];
         for (int i = 0; i < points.size(); i++){
             for (int j = 0; j < i; j++){
-                distancesBetweenPivots[i][j] = PointHelper.instance().getDistanceBetweenPoints(points.get(i), points.get(j));
+                SharedMemory.distancesBetweenPivots[i][j] = PointHelper.instance().getDistanceBetweenPoints(points.get(i), points.get(j));
+                SharedMemory.distancesBetweenPivots[j][i] = SharedMemory.distancesBetweenPivots[i][j];
             }
         }
     }

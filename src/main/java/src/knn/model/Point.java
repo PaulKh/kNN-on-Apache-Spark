@@ -51,4 +51,8 @@ public class Point implements Serializable{
         else
             return false;
     }
+//    public Point getCopy(){
+//        Point point = new Point(this.coordinates);
+//        return point;
+//    }
 }
