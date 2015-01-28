@@ -7,6 +7,7 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.PairFunction;
 import scala.Tuple2;
 import src.knn.model.*;
+import src.knn.utilities.LimitedSizeQueue;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -44,8 +45,69 @@ public class KnnCalculator implements Serializable{
 
         JavaRDD<BoundingEntity> boundingEntityJavaRDD = calculateBounds(groupedPivots);
 
-        JavaRDD<FinalPartition[]> finalPartitions = assignPointsAccordingToBounds(boundingEntityJavaRDD);
-//        List<FinalPartition[]> result = finalPartitions.collect();
+        JavaRDD<FinalPartition> finalPartitions = reduceAndRepartition(sc, assignPointsAccordingToBounds(boundingEntityJavaRDD));
+        KNNOfPartition knn = collectFinalResult(calculatingKNN(finalPartitions));
+
+//        System.out.println("sum = " + sum);
+//        JavaRDD<PivotPoint> pivotPoints = findRPointsAssignedToPivots(sourceRPointsRDD).union(findSPointsAssignedToPivots(sourceSPointsRDD));
+//        pivotPoints.groupBy()
+//        FirstPointDistributionEntity pivotPointsAfterReduce = groupedPivots.reduce((pivotPoint1, pivotPoint2) -> {
+//                System.out.println(pivotPoint1.getPivot().getId() + " " + pivotPoint2.getPivot().getId());
+//                return pivotPoint1;
+//            }
+//        );
+//        JavaRDD<List<Point>> pivots = getPivots(sourceData, numberOfPivots);
+//        pivots.reduce((p1, p2) -> PointHelper.instance().union(p1, p2));
+        sc.stop();
+    }
+    private KNNOfPartition collectFinalResult(JavaRDD<KNNOfPartition> knn){
+        return knn.reduce((partition1, partition2) ->{
+            partition1.addAll(partition2.getKnn());
+            return partition1;
+        });
+    }
+    private JavaRDD<KNNOfPartition> calculatingKNN(JavaRDD<FinalPartition> finalPartitions){
+        return finalPartitions.map(finalPartition -> {
+            KNNOfPartition knnOfPartition = new KNNOfPartition();
+            for (int i = 0; i < finalPartition.getPointsS().size(); i++){
+                int currentMinimum = i;
+                for (int j = i; j < finalPartition.getPointsS().size(); j++){
+                    if (SharedMemory.distancesBetweenPivots[finalPartition.getPointsS().get(j).getPivotPointId()][finalPartition.getPivotPointId()]
+                            < SharedMemory.distancesBetweenPivots[finalPartition.getPointsS().get(currentMinimum).getPivotPointId()][finalPartition.getPivotPointId()]){
+                         currentMinimum = j;
+                    }
+                }
+                Collections.swap(finalPartition.getPointsS(), i, currentMinimum);
+            }
+            for (Point rPoint: finalPartition.getPointsR()){
+                double teta = SharedMemory.maximumUpperBounds[finalPartition.getPivotPointId()].getYongest();
+                PointWithDistance farthestPoint = null;
+                KNNOfPoint knnOfPoint = new KNNOfPoint(rPoint);
+                for (int i = 0; i < finalPartition.getPointsS().size(); i++){
+                    List<Point> sPoints = finalPartition.getPointsS().get(i).getsPoints();
+                    for (int j = 0; j < sPoints.size(); j++){
+                        double distance = PointHelper.instance().getDistanceBetweenPoints(sPoints.get(j), rPoint);
+                         if(distance < teta){
+                             knnOfPoint.addSPoint(new PointWithDistance(sPoints.get(j), distance));
+                             if (knnOfPoint.numberOfSPointsAdded() == SharedMemory.k){
+                                 farthestPoint = knnOfPoint.getFarthestPoint();
+                                 teta = farthestPoint.getDistance();
+                             }
+                             else if (knnOfPoint.numberOfSPointsAdded() > SharedMemory.k){
+                                 knnOfPoint.removePoint(farthestPoint);
+                                 farthestPoint = knnOfPoint.getFarthestPoint();
+                                 teta = farthestPoint.getDistance();
+                             }
+                         }
+                    }
+                }
+                knnOfPartition.addKNNOfPoint(knnOfPoint);
+            }
+            return knnOfPartition;
+        });
+    }
+
+    private JavaRDD<FinalPartition> reduceAndRepartition(JavaSparkContext sc, JavaRDD<FinalPartition[]> finalPartitions){
         FinalPartition[] reducedData = finalPartitions.reduce((partition1, partition2) -> {
             for (int i = 0; i < partition1.length; i++){
                 if (partition2[i].getPointsR().size() > 0){
@@ -64,18 +126,7 @@ public class KnnCalculator implements Serializable{
             }
             System.out.println("sum[" + i + "] = " + sum + "Rs.count = " + reducedData[i].getPointsR().size() + " numberOfComputations = " + reducedData[i].getPointsR().size() * sum);
         }
-        JavaRDD<FinalPartition> finalFinalPartitioning = sc.parallelize(Arrays.asList(reducedData));
-//        System.out.println("sum = " + sum);
-//        JavaRDD<PivotPoint> pivotPoints = findRPointsAssignedToPivots(sourceRPointsRDD).union(findSPointsAssignedToPivots(sourceSPointsRDD));
-//        pivotPoints.groupBy()
-//        FirstPointDistributionEntity pivotPointsAfterReduce = groupedPivots.reduce((pivotPoint1, pivotPoint2) -> {
-//                System.out.println(pivotPoint1.getPivot().getId() + " " + pivotPoint2.getPivot().getId());
-//                return pivotPoint1;
-//            }
-//        );
-//        JavaRDD<List<Point>> pivots = getPivots(sourceData, numberOfPivots);
-//        pivots.reduce((p1, p2) -> PointHelper.instance().union(p1, p2));
-        sc.stop();
+        return sc.parallelize(Arrays.asList(reducedData));
     }
 
     private JavaRDD<FinalPartition[]> assignPointsAccordingToBounds(JavaRDD<BoundingEntity> boundingEntityJavaRDD){
