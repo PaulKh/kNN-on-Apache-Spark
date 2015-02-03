@@ -12,6 +12,7 @@ import java.util.*;
  * To change this template use File | Settings | File Templates.
  */
 public class PointHelper {
+    public static int numberOfDistanceComputations = 0;
     private static PointHelper pointHelper;
 
     public synchronized static PointHelper instance() {
@@ -50,6 +51,7 @@ public class PointHelper {
         return points;
     }
     public double getDistanceBetweenPoints(Point p1, Point p2){
+        numberOfDistanceComputations++;
         if (p1.getCoordinates().size() != p2.getCoordinates().size())
             return 0;
         else if(p1.getCoordinates().size() == 1)

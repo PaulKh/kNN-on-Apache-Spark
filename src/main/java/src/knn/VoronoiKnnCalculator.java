@@ -84,6 +84,8 @@ public class VoronoiKnnCalculator implements Serializable{
                 PointWithDistance farthestPoint = null;
                 KNNOfPoint knnOfPoint = new KNNOfPoint(rPoint);
                 for (int i = 0; i < finalPartition.getPointsS().size(); i++){
+                    if (checkCorollary(rPoint, finalPartition.getPivotPointId(), finalPartition.getPointsS().get(i).getPivotPointId(), teta))
+                        continue;
                     List<Point> sPoints = finalPartition.getPointsS().get(i).getsPoints();
                     for (int j = 0; j < sPoints.size(); j++){
                         double distance = PointHelper.instance().getDistanceBetweenPoints(sPoints.get(j), rPoint);
@@ -108,6 +110,13 @@ public class VoronoiKnnCalculator implements Serializable{
             }
             return knnOfPartition;
         });
+    }
+
+    private boolean checkCorollary(Point rPoint, int pivotFromRId, int pivotFromSId, double teta){
+        double nominator = Math.pow(PointHelper.instance().getDistanceBetweenPoints(rPoint, SharedMemory.pivots[pivotFromRId].getPivot()), 2)
+                - Math.pow(PointHelper.instance().getDistanceBetweenPoints(rPoint, SharedMemory.pivots[pivotFromSId].getPivot()), 2);
+        double denominator = 2 * SharedMemory.distancesBetweenPivots[pivotFromRId][pivotFromSId];
+        return nominator/denominator > teta;
     }
 
     private JavaRDD<FinalPartition> reduceAndRepartition(JavaSparkContext sc, JavaRDD<FinalPartition[]> finalPartitions){
