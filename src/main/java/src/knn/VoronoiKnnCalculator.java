@@ -26,11 +26,11 @@ import java.util.List;
  * Time: 12:38
  * To change this template use File | Settings | File Templates.
  */
-public class KnnCalculator implements Serializable{
+public class VoronoiKnnCalculator implements Serializable{
     private static final String rArraySource = "src/main/resources/r_points_two_dimension_array.txt";
     private static final String sArraySource = "src/main/resources/s_points_two_dimension_array.txt";
 
-    public KnnCalculator() {
+    public VoronoiKnnCalculator() {
         SparkConf sparkConf = new SparkConf().setAppName("KNN Spark").setMaster("local[2]").set("spark.executor.memory", "3000m");
         JavaSparkContext sc = new JavaSparkContext(sparkConf);
         List<Point> sourceRPoints = parsePointsFromSource(rArraySource);
@@ -41,7 +41,7 @@ public class KnnCalculator implements Serializable{
         JavaPairRDD<Integer, FirstPointDistributionEntity> pairsR = findRPointsAssignedToPivots(sourceRPointsRDD);
         JavaPairRDD<Integer, FirstPointDistributionEntity> pairsS = findSPointsAssignedToPivots(sourceSPointsRDD);
         JavaPairRDD<Integer, Iterable<FirstPointDistributionEntity>> pivotPoints = pairsR.union(pairsS).groupByKey();
-        JavaRDD<FirstPointDistributionEntity> groupedPivots = groupPivotPointsAndCollectStatistics(pivotPoints).cache();
+        JavaRDD<FirstPointDistributionEntity> groupedPivots = groupPivotPointsAndCollectStatistics(pivotPoints);
 
         JavaRDD<BoundingEntity> boundingEntityJavaRDD = calculateBounds(groupedPivots);
 
@@ -99,6 +99,9 @@ public class KnnCalculator implements Serializable{
                                  teta = farthestPoint.getDistance();
                              }
                          }
+                        else if(distance == teta && knnOfPoint.numberOfSPointsAdded() < SharedMemory.k){
+                             knnOfPoint.addSPoint(new PointWithDistance(sPoints.get(j), distance));
+                        }
                     }
                 }
                 knnOfPartition.addKNNOfPoint(knnOfPoint);
