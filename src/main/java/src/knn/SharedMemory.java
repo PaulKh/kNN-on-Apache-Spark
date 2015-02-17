@@ -16,10 +16,10 @@ import java.util.List;
  */
 public class SharedMemory {
     public static PivotPoint pivots[];
-    public static final int numberOfPivots = 100;
-    public static final int k = 10;
+    public static final int numberOfPivots = 200;
+    public static final int k = 100;
     public static LimitedSizeQueue<Double> maximumUpperBounds[];
-    public static double distancesBetweenPivots[][];
+    public static int distancesBetweenPivots[][];
     public static void initPoints(List<Point> points){
         if (points.size() != numberOfPivots){
             System.out.println("Wrong number of pivots");
@@ -35,6 +35,14 @@ public class SharedMemory {
         maximumUpperBounds = new LimitedSizeQueue[numberOfPivots];
         for (int i = 0; i < numberOfPivots; i++){
             maximumUpperBounds[i] = new LimitedSizeQueue<Double>(k);
+        }
+    }
+    public static void setUpperBound(int index, double value){
+        if (SharedMemory.maximumUpperBounds[index].size() < SharedMemory.k){
+            SharedMemory.maximumUpperBounds[index].add(value);
+        }
+        else if(SharedMemory.maximumUpperBounds[index].getYongest() > value){
+            SharedMemory.maximumUpperBounds[index].add(value);
         }
     }
 }

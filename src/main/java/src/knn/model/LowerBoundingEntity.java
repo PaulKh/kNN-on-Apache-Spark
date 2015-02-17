@@ -11,7 +11,7 @@ import java.util.List;
  * Time: 11:56
  * To change this template use File | Settings | File Templates.
  */
-public class BoundingEntity implements Serializable{
+public class LowerBoundingEntity implements Serializable{
     private int pivotPointId;
     private List<PointWithLowerBounds> sPointsWithLowerBounds = new ArrayList<PointWithLowerBounds>();
     private List<Point> rPointsAssignedToPivot = new ArrayList<Point>();
@@ -36,9 +36,7 @@ public class BoundingEntity implements Serializable{
         return rPointsAssignedToPivot;
     }
 
-    public void setrPointsAssignedToPivot(List<PointWithDistance> rPointsAssignedToPivot) {
-        for (PointWithDistance pointWithDistance: rPointsAssignedToPivot){
-            this.rPointsAssignedToPivot.add(pointWithDistance.getPoint());
-        }
+    public void setrPointsAssignedToPivot(List<Point> rPointsAssignedToPivot) {
+        this.rPointsAssignedToPivot = rPointsAssignedToPivot;
     }
 }
