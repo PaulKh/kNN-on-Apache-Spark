@@ -26,8 +26,8 @@ import java.util.List;
  * To change this template use File | Settings | File Templates.
  */
 public class VoronoiKnnCalculator implements Serializable{
-    private static final String rArraySource = "src/main/resources/r_points_two_dimension_array.txt";
-    private static final String sArraySource = "src/main/resources/s_points_two_dimension_array.txt";
+    private static final String rArraySource = "src/main/resources/r_points_liechtenstein.txt";
+    private static final String sArraySource = "src/main/resources/s_points_liechtenstein.txt";
 
     public VoronoiKnnCalculator() {
         SparkConf sparkConf = new SparkConf().setAppName("KNN Spark").setMaster("local[2]").set("spark.executor.memory", "3000m");
@@ -308,10 +308,11 @@ public class VoronoiKnnCalculator implements Serializable{
 
         for (String pointString: pointsStringArray){
             String[] coordinates = pointString.split(",");
-            List<Integer> coordinatesInteger = new ArrayList<Integer>();
-            for(String coordinate: coordinates){
-                coordinatesInteger.add(Integer.parseInt(coordinate));
-            }
+            List<Double> coordinatesInteger = new ArrayList<Double>();
+                for(String coordinate: coordinates){
+                    coordinatesInteger.add(Double.parseDouble(coordinate));
+                }
+
             points.add(new Point(coordinatesInteger));
         }
         return points;
@@ -370,10 +371,10 @@ public class VoronoiKnnCalculator implements Serializable{
         SharedMemory.initPoints(pivotPoints);
     }
     private void initDistancesBetweenPoints(List<Point> points){
-        SharedMemory.distancesBetweenPivots = new int[points.size()][points.size()];
+        SharedMemory.distancesBetweenPivots = new double[points.size()][points.size()];
         for (int i = 0; i < points.size(); i++){
             for (int j = 0; j < i; j++){
-                SharedMemory.distancesBetweenPivots[i][j] = (int)PointHelper.instance().getDistanceBetweenPoints(points.get(i), points.get(j));
+                SharedMemory.distancesBetweenPivots[i][j] = PointHelper.instance().getDistanceBetweenPoints(points.get(i), points.get(j));
                 SharedMemory.distancesBetweenPivots[j][i] = SharedMemory.distancesBetweenPivots[i][j];
             }
         }

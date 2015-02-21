@@ -16,10 +16,10 @@ import java.util.List;
  */
 public class SharedMemory {
     public static PivotPoint pivots[];
-    public static final int numberOfPivots = 200;
-    public static final int k = 100;
+    public static int numberOfPivots = 50;
+    public static int k = 50;
     public static LimitedSizeQueue<Double> maximumUpperBounds[];
-    public static int distancesBetweenPivots[][];
+    public static double distancesBetweenPivots[][];
     public static void initPoints(List<Point> points){
         if (points.size() != numberOfPivots){
             System.out.println("Wrong number of pivots");

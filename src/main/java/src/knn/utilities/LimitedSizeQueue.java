@@ -26,7 +26,10 @@ public class LimitedSizeQueue<K> extends ArrayList<K> {
     }
 
     public K getYongest() {
-        return get(size() - 1);
+        if (size() != 0)
+            return get(size() - 1);
+        else
+            return null;
     }
 
     public K getOldest() {

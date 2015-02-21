@@ -10,12 +10,12 @@ import java.io.Serializable;
  * Time: 12:44
  * To change this template use File | Settings | File Templates.
  */
-public class Point implements Serializable{
+public class Point<Double> implements Serializable{
     private static int idCounter = 1;
     private int id;
-    private List<Integer> coordinates;
+    private List<Double> coordinates;
 
-    public Point(List<Integer> coordinates) {
+    public Point(List<Double> coordinates) {
         id = idCounter;
         idCounter++;
         this.coordinates = coordinates;
@@ -25,13 +25,13 @@ public class Point implements Serializable{
         return id;
     }
 
-    public List<Integer> getCoordinates() {
+    public List<Double> getCoordinates() {
         return coordinates;
     }
     public void printPoint(){
         System.out.println();
         System.out.print("p = ");
-        for (Integer i:coordinates){
+        for (Double i:coordinates){
             System.out.print(i + ",");
         }
     }

@@ -50,16 +50,16 @@ public class PointHelper {
         }
         return points;
     }
-    public double getDistanceBetweenPoints(Point p1, Point p2){
+    public double getDistanceBetweenPoints(Point<Double> p1, Point<Double> p2){
         numberOfDistanceComputations++;
         if (p1.getCoordinates().size() != p2.getCoordinates().size())
             return 0;
         else if(p1.getCoordinates().size() == 1)
             return Math.abs(p1.getCoordinates().get(0) - p2.getCoordinates().get(0));
         else{
-            long squaresSummation = 0;
+            double squaresSummation = 0;
             for (int i = 0; i < p1.getCoordinates().size(); i++){
-                squaresSummation += Math.pow(p1.getCoordinates().get(i) - p2.getCoordinates().get(i), 2);
+                squaresSummation += Math.pow(p1.getCoordinates().get(i) - p2.getCoordinates().get(i), 2.0);
             }
             return Math.sqrt(squaresSummation);
         }
